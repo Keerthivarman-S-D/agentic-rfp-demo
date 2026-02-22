@@ -1,0 +1,20 @@
+{
+  "rfp_id": "RFP-TEST-001",
+  "title": "Test Cable Supply",
+  "client_name": "Test Authority",
+  "due_date": "2025-04-15",
+  "products": [
+    {
+      "line": 1,
+      "quantity": 5000,
+      "req_material": "Copper",
+      "req_insulation": "XLPE",
+      "req_cores": 4,
+      "req_size_mm2": 95,
+      "req_voltage_kv": 1.1
+    }
+  ],
+  "test_requirements": ["High Voltage Dielectric Test"],
+  "bid_bond_required": true,
+  "bid_bond_value": 500000
+}

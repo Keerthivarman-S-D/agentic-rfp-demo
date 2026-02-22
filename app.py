@@ -106,7 +106,7 @@ def sales_agent_scan(rfp_data: List[Dict]) -> List[Dict]:
     Sales Agent: Market Intelligence & Risk Scout
     Role: Proactively qualify leads and extract commercial risks.
     """
-    st.subheader("🔍 Sales Discovery Agent: Market Intelligence Scan")
+    st.subheader("Sales Discovery Agent - Market Intelligence Scan")
     st.info("**Role:** First line of defense - Extracting metadata and calculating risk profiles...")
     time.sleep(1)
 
@@ -124,22 +124,22 @@ def sales_agent_scan(rfp_data: List[Dict]) -> List[Dict]:
         risk_score = calculate_risk_score(rfp)
         
         if days_remaining < 30:
-            priority = "🔴 HIGH PRIORITY"
+            priority = "HIGH PRIORITY"
         elif days_remaining <= 90:
-            priority = "🟡 IMMEDIATE ACTION"
+            priority = "IMMEDIATE ACTION"
         else:
-            priority = "🟢 STRATEGIC MONITORING"
+            priority = "STRATEGIC MONITORING"
         
         display_data.append({
-            "ID": rfp["ID"], 
+            "ID": rfp["ID"],
             "Client": rfp.get("Client_Name", "N/A"),
-            "Title": rfp["Title"], 
+            "Title": rfp["Title"],
             "Due Date": due_date.strftime('%Y-%m-%d'),
             "Days Left": days_remaining,
             "Risk Score": f"{risk_score}/10",
             "Priority": priority,
-            "Bid Bond": "✅" if rfp.get("Bid_Bond_Required") else "❌",
-            "Qualified": "✅" if is_qualified else "❌"
+            "Bid Bond": "Yes" if rfp.get("Bid_Bond_Required") else "No",
+            "Qualified": "Yes" if is_qualified else "No"
         })
         
         if is_qualified:
@@ -148,13 +148,21 @@ def sales_agent_scan(rfp_data: List[Dict]) -> List[Dict]:
             qualified_rfps.append(rfp)
     
     if qualified_rfps:
-        st.success(f"✅ **Intelligence Report:** {len(qualified_rfps)} high-value opportunity(ies) identified within 90-day window.")
+        st.success(f"Intelligence Report: {len(qualified_rfps)} high-value opportunity(ies) identified within 90-day window.")
     else:
-        st.warning("⚠️ No immediate opportunities detected. All RFPs beyond strategic threshold.")
+        st.warning("No immediate opportunities detected. All RFPs beyond strategic threshold.")
         
     st.dataframe(pd.DataFrame(display_data), use_container_width=True)
     
     return qualified_rfps
+
+def _calculate_match_score(rfp_value: Any, sku_value: Any, weight: float, comparison_fn=None) -> tuple:
+    """Helper function to calculate match score for a specification parameter."""
+    if comparison_fn is None:
+        comparison_fn = lambda r, s: r == s
+    match = 1.0 if comparison_fn(rfp_value, sku_value) else 0.0
+    score = match * weight * 100
+    return match, score
 
 def calculate_smm_weighted(rfp_spec: Dict, sku_data: Dict) -> tuple:
     """
@@ -168,40 +176,42 @@ def calculate_smm_weighted(rfp_spec: Dict, sku_data: Dict) -> tuple:
         "Insulation": 0.20,
     }
     
-    breakdown = {}
+    breakdown = {
+        "Material": {"match": 0.0, "score": 0.0, "weight": weights["Material"]},
+        "Cores": {"match": 0.0, "score": 0.0, "weight": weights["Cores"]},
+        "Size_mm2": {"match": 0.0, "score": 0.0, "weight": weights["Size_mm2"]},
+        "Insulation": {"match": 0.0, "score": 0.0, "weight": weights["Insulation"]},
+    }
     total_smm = 0.0
     
     # Material (30%) - Binary Match
-    rfp_material = rfp_spec.get("Req_Material")
-    sku_material = sku_data.get("Material")
-    material_match = 1.0 if rfp_material == sku_material else 0.0
-    material_score = material_match * weights["Material"] * 100
+    material_match, material_score = _calculate_match_score(
+        rfp_spec.get("Req_Material"), sku_data.get("Material"), weights["Material"]
+    )
     total_smm += material_score
-    breakdown["Material"] = {"match": material_match, "score": material_score, "weight": weights["Material"]}
+    breakdown["Material"].update({"match": material_match, "score": material_score})
     
     # Cores (25%) - Binary Match
-    rfp_cores = rfp_spec.get("Req_Cores")
-    sku_cores = sku_data.get("Cores")
-    cores_match = 1.0 if rfp_cores == sku_cores else 0.0
-    cores_score = cores_match * weights["Cores"] * 100
+    cores_match, cores_score = _calculate_match_score(
+        rfp_spec.get("Req_Cores"), sku_data.get("Cores"), weights["Cores"]
+    )
     total_smm += cores_score
-    breakdown["Cores"] = {"match": cores_match, "score": cores_score, "weight": weights["Cores"]}
+    breakdown["Cores"].update({"match": cores_match, "score": cores_score})
     
     # Size (25%) - Meet or Exceed
-    rfp_size = rfp_spec.get("Req_Size_mm2")
-    sku_size = sku_data.get("Size_mm2")
-    size_match = 1.0 if (rfp_size and sku_size and sku_size >= rfp_size) else 0.0
-    size_score = size_match * weights["Size_mm2"] * 100
+    size_match, size_score = _calculate_match_score(
+        rfp_spec.get("Req_Size_mm2"), sku_data.get("Size_mm2"), weights["Size_mm2"],
+        lambda r, s: r and s and s >= r
+    )
     total_smm += size_score
-    breakdown["Size_mm2"] = {"match": size_match, "score": size_score, "weight": weights["Size_mm2"]}
+    breakdown["Size_mm2"].update({"match": size_match, "score": size_score})
     
     # Insulation (20%) - Binary Match
-    rfp_insulation = rfp_spec.get("Req_Insulation")
-    sku_insulation = sku_data.get("Insulation")
-    insulation_match = 1.0 if rfp_insulation == sku_insulation else 0.0
-    insulation_score = insulation_match * weights["Insulation"] * 100
+    insulation_match, insulation_score = _calculate_match_score(
+        rfp_spec.get("Req_Insulation"), sku_data.get("Insulation"), weights["Insulation"]
+    )
     total_smm += insulation_score
-    breakdown["Insulation"] = {"match": insulation_match, "score": insulation_score, "weight": weights["Insulation"]}
+    breakdown["Insulation"].update({"match": insulation_match, "score": insulation_score})
     
     return round(total_smm, 2), breakdown
 
@@ -210,7 +220,7 @@ def technical_agent_match(rfp_products: List[Dict]) -> List[Dict]:
     Technical Agent: Senior Electrical Design Engineer
     Role: Calculate weighted SMM and protect against technical non-compliance.
     """
-    st.subheader("⚙️ Technical Agent: Weighted SMM Analysis")
+    st.subheader("Technical Agent - Weighted SMM Analysis")
     st.info("**Role:** Senior Design Engineer - Executing precision specification matching against OEM repository...")
     time.sleep(1)
     
@@ -237,13 +247,13 @@ def technical_agent_match(rfp_products: List[Dict]) -> List[Dict]:
             smm_val = sku_scores[i]["SMM"]
             
             if smm_val == 100:
-                status = "✅ Perfect Match"
+                status = "Perfect Match"
             elif smm_val >= 85:
-                status = "✅ Qualified"
+                status = "Qualified"
             elif smm_val >= 80:
-                status = "⚠️ Marginal"
+                status = "Marginal"
             else:
-                status = "❌ Custom Req'd"
+                status = "Custom Required"
             
             comparison_row = {
                 "Rank": i + 1,
@@ -260,15 +270,16 @@ def technical_agent_match(rfp_products: List[Dict]) -> List[Dict]:
         st.markdown(f"**Line {product_req['Line']}: {product_req['Req_Cores']}C × {product_req['Req_Size_mm2']}mm² {product_req['Req_Insulation']} Cable**")
         st.dataframe(pd.DataFrame(top_3_comparison), use_container_width=True)
         
-        with st.expander(f"📊 SMM Breakdown for {top_sku['SKU']}"):
-            breakdown_display = []
-            for param, details in top_sku["Breakdown"].items():
-                breakdown_display.append({
+        with st.expander(f"SMM Breakdown for {top_sku['SKU']}"):
+            breakdown_display = [
+                {
                     "Parameter": param,
                     "Weight": f"{details['weight']*100:.0f}%",
-                    "Match": "✅" if details['match'] == 1.0 else "❌",
+                    "Match": "Yes" if details['match'] == 1.0 else "No",
                     "Score": f"{details['score']:.1f}"
-                })
+                }
+                for param, details in top_sku["Breakdown"].items()
+            ]
             st.table(pd.DataFrame(breakdown_display))
         
         product_req["Chosen_SKU"] = top_sku["SKU"]
@@ -277,7 +288,7 @@ def technical_agent_match(rfp_products: List[Dict]) -> List[Dict]:
         product_req["SMM_Breakdown"] = top_sku["Breakdown"]
         final_selections.append(product_req)
         
-    st.success("✅ **Technical Compliance Review Complete.** Recommended SKUs identified.")
+    st.success("Technical Compliance Review Complete. Recommended SKUs identified.")
     return final_selections
 
 def pricing_agent_calculate(selected_products: List[Dict], test_reqs: List[str], rfp_metadata: Dict) -> Dict:
@@ -285,16 +296,16 @@ def pricing_agent_calculate(selected_products: List[Dict], test_reqs: List[str],
     Pricing Agent: Industrial Financial Controller
     Role: Dynamic commodity-indexed costing with risk premiums.
     """
-    st.subheader("💰 Pricing Agent: Dynamic Costing Engine")
+    st.subheader("Pricing Agent - Dynamic Costing Engine")
     st.info("**Role:** Financial Controller - Applying LME commodity indexing and margin optimization...")
     time.sleep(1)
     
-    material_cost_data = []
     total_base_cost = 0
     total_metal_cost = 0
     total_services_cost = 0
 
     # Material Costs with LME Indexing
+    cost_rows = []
     for product in selected_products:
         sku = product["Chosen_SKU"]
         sku_details = product["SKU_Details"]
@@ -317,7 +328,7 @@ def pricing_agent_calculate(selected_products: List[Dict], test_reqs: List[str],
         total_base_cost += line_base_cost
         total_metal_cost += line_metal_cost
         
-        material_cost_data.append({
+        cost_rows.append({
             "Line": product["Line"],
             "SKU": sku,
             "Quantity": f"{qty:,} m",
@@ -326,6 +337,8 @@ def pricing_agent_calculate(selected_products: List[Dict], test_reqs: List[str],
             "Unit Price (₹/m)": f"₹{unit_price:,.0f}",
             "Line Total (₹)": f"₹{line_material_cost:,.0f}"
         })
+    
+    material_cost_data = cost_rows
 
     total_material_cost = total_base_cost + total_metal_cost
 
@@ -365,19 +378,17 @@ def pricing_agent_calculate(selected_products: List[Dict], test_reqs: List[str],
             "Cost (₹)": f"₹{risk_premium:,.0f}"
         })
         
-    st.markdown("#### 📦 Material Cost Breakdown (LME-Indexed)")
+    st.markdown("#### Material Cost Breakdown (LME-Indexed)")
     st.dataframe(pd.DataFrame(material_cost_data), use_container_width=True)
-    
-    st.markdown("#### 🧪 Services & Risk Cost Breakdown")
+
+    st.markdown("#### Services & Risk Cost Breakdown")
     st.dataframe(pd.DataFrame(test_cost_data), use_container_width=True)
-    
-    with st.expander("📈 Current LME Commodity Rates"):
-        lme_display = []
-        for metal, rate in LME_RATES.items():
-            lme_display.append({"Metal": metal, "Rate (USD/MT)": f"${rate:,}", "Source": "LME Live"})
+
+    with st.expander("Current LME Commodity Rates"):
+        lme_display = [{"Metal": metal, "Rate (USD/MT)": f"${rate:,}", "Source": "LME Live"} for metal, rate in LME_RATES.items()]
         st.table(pd.DataFrame(lme_display))
 
-    st.success(f"✅ **Dynamic Pricing Complete.** Target Margin: {(TARGET_MARGIN-1)*100:.0f}%")
+    st.success(f"Dynamic Pricing Complete. Target Margin: {(TARGET_MARGIN-1)*100:.0f}%")
     
     return {
         "Total_Material_Cost": total_material_cost * TARGET_MARGIN,
@@ -388,12 +399,61 @@ def pricing_agent_calculate(selected_products: List[Dict], test_reqs: List[str],
         "Risk_Premium": risk_premium,
     }
 
+def generate_tech_summary(selected_products: List[Dict]) -> List[Dict]:
+    """
+    Generate technical product summary for executive presentation.
+    """
+    return [
+        {
+            "Line": p["Line"],
+            "Quantity": f"{p['Quantity']:,} m",
+            "RFP Spec": f"{p['Req_Cores']}C × {p['Req_Size_mm2']}mm² {p['Req_Insulation']}",
+            "Matched SKU": p["Chosen_SKU"],
+            "SMM (%)": p["Final_SMM"]
+        }
+        for p in selected_products
+    ]
+
+def display_tech_summary(selected_products: List[Dict]) -> None:
+    """
+    Display technical product summary in UI.
+    """
+    final_tech_summary = generate_tech_summary(selected_products)
+    st.markdown("### Technical Product Summary")
+    st.dataframe(pd.DataFrame(final_tech_summary), use_container_width=True)
+
+def display_executive_summary(selected_products: List[Dict], pricing_result: Dict, low_match_skus: List[Dict]) -> None:
+    """
+    Display executive summary with technical summary and final bid value.
+    """
+    display_tech_summary(selected_products)
+
+    st.markdown("---")
+    st.markdown("### Final Bid Value")
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Material Cost", f"₹{pricing_result['Total_Material_Cost']:,.0f}")
+    with col2:
+        st.metric("Services & Testing", f"₹{pricing_result['Total_Services_Cost']:,.0f}")
+    with col3:
+        st.metric("Risk Premium", f"₹{pricing_result.get('Risk_Premium', 0):,.0f}")
+    with col4:
+        st.metric("GRAND TOTAL", f"₹{pricing_result['Grand_Total']:,.0f}", delta="Submission Ready", delta_color="normal")
+
+    st.markdown("---")
+    if not low_match_skus:
+        st.balloons()
+        st.success("Bid Fully Qualified. Technical integrity: 100%. Ready for Board approval and submission.")
+    else:
+        st.warning("Manual Review Required. Engineering team must evaluate custom manufacturing feasibility.")
+
 def business_advisory_agent(pricing_result: Dict, selected_products: List[Dict], rfp_metadata: Dict) -> None:
     """
     Business Advisory Agent: Strategic Management Consultant
     Role: Quantify ROI and provide sensitivity analysis.
     """
-    st.subheader("📊 Business Advisory Agent: Strategic ROI Analysis")
+    st.subheader("Business Advisory Agent - Strategic ROI Analysis")
     st.info("**Role:** Management Consultant - Quantifying business value and competitive advantage...")
     time.sleep(1)
     
@@ -415,7 +475,7 @@ def business_advisory_agent(pricing_result: Dict, selected_products: List[Dict],
         st.metric("Operational Savings", f"${savings:,.0f}", f"{savings_percent:.1f}% reduction")
     
     # Sensitivity Analysis - Copper Price Impact
-    st.markdown("### 💹 Commodity Sensitivity Analysis")
+    st.markdown("### Commodity Sensitivity Analysis")
     
     copper_scenarios = [-10, -5, 0, 5, 10]
     sensitivity_data = []
@@ -441,7 +501,7 @@ def business_advisory_agent(pricing_result: Dict, selected_products: List[Dict],
     st.dataframe(pd.DataFrame(sensitivity_data), use_container_width=True)
     
     # Competitive Edge
-    st.markdown("### 🏆 Competitive Advantage Metrics")
+    st.markdown("### Competitive Advantage Metrics")
     days_remaining = (rfp_metadata["Due_Date"] - datetime.datetime.now().date()).days
     time_saved = 2  # days
     first_to_bid_advantage = min(12 * time_saved, 24)  # 12% per day saved, max 24%
@@ -455,84 +515,95 @@ def business_advisory_agent(pricing_result: Dict, selected_products: List[Dict],
     
     st.dataframe(pd.DataFrame(competitive_metrics), use_container_width=True)
     
-    st.success("📈 **Strategic Advisory Complete.** Bottom-line value quantified for Board presentation.")
+    st.success("Strategic Advisory Complete. Bottom-line value quantified for Board presentation.")
+
+def build_risk_alert_text(qualified_rfp: Dict) -> str:
+    """Helper function to build risk alert text from RFP metadata."""
+    alert_text = ""
+    if qualified_rfp.get("Bid_Bond_Required"):
+        alert_text += f"Bid Bond Required (₹{qualified_rfp.get('Bid_Bond_Value', 0):,.0f}). "
+    if qualified_rfp.get("Liquidated_Damages_Clause"):
+        alert_text += "Liquidated Damages Clause Present."
+    return alert_text
 
 def main_orchestrator(qualified_rfp: Dict):
     """
     Main Orchestrator: Chief Bid Officer (CBO)
     Role: Decompose RFPs into parallel workstreams and manage cross-agent consistency.
     """
-    st.title(f"🚀 Chief Bid Officer: Processing RFP {qualified_rfp['ID']}")
-    
-    st.markdown("### Context Decomposition")
-    st.markdown(f"**Client:** {qualified_rfp.get('Client_Name', 'N/A')}")
-    st.markdown(f"**RFP Title:** {qualified_rfp['Title']}")
-    st.markdown(f"**Due Date:** {qualified_rfp['Due_Date'].strftime('%Y-%m-%d')}")
-    st.markdown(f"**Risk Score:** {qualified_rfp.get('Risk_Score', 'N/A')}/10")
-    
-    if qualified_rfp.get("Bid_Bond_Required"):
-        st.warning(f"⚠️ **Risk Alert:** Bid Bond Required (₹{qualified_rfp.get('Bid_Bond_Value', 0):,.0f})")
-    if qualified_rfp.get("Liquidated_Damages_Clause"):
-        st.warning("⚠️ **Risk Alert:** Liquidated Damages Clause Present")
-    
-    st.divider()
-    
-    # Phase 1: Technical Matching
-    st.markdown("## ⚙️ Phase 1: Technical Compliance Review")
-    selected_products = technical_agent_match(qualified_rfp["Products"])
-    
-    # Check SMM threshold for intervention
-    low_match_skus = [p for p in selected_products if p["Final_SMM"] < 80]
-    if low_match_skus:
-        st.error(f"🚨 **ENGINEERING INTERVENTION REQUIRED:** {len(low_match_skus)} SKU(s) below 80% SMM threshold.")
-        for sku in low_match_skus:
-            st.markdown(f"- Line {sku['Line']}: {sku['Chosen_SKU']} (SMM: {sku['Final_SMM']}%)")
-    
-    st.divider()
+    st.title(f"Chief Bid Officer - Processing RFP {qualified_rfp['ID']}")
 
-    # Phase 2: Pricing Estimation
-    st.markdown("## 💰 Phase 2: Dynamic Pricing & Risk Assessment")
-    pricing_result = pricing_agent_calculate(selected_products, qualified_rfp["Test_Requirements"], qualified_rfp)
-    st.divider()
-    
-    # Phase 3: Business Advisory
-    st.markdown("## 📊 Phase 3: Strategic Business Intelligence")
-    business_advisory_agent(pricing_result, selected_products, qualified_rfp)
-    st.divider()
-    
-    # Phase 4: Final Consolidation
-    st.markdown("## ✅ Phase 4: Executive Summary")
-    
-    final_tech_summary = [
-        {
-            "Line": p["Line"], 
-            "Quantity": f"{p['Quantity']:,} m",
-            "RFP Spec": f"{p['Req_Cores']}C × {p['Req_Size_mm2']}mm² {p['Req_Insulation']}", 
-            "Matched SKU": p["Chosen_SKU"], 
-            "SMM (%)": p["Final_SMM"]
-        }
-        for p in selected_products
-    ]
-    st.markdown("### Technical Product Summary")
-    st.dataframe(pd.DataFrame(final_tech_summary), use_container_width=True)
-    
-    st.markdown("### Final Bid Value")
+    # Context Information Section
     col1, col2, col3, col4 = st.columns(4)
-    
     with col1:
-        st.metric("Material Cost", f"₹{pricing_result['Total_Material_Cost']:,.0f}")
+        st.metric("Client", qualified_rfp.get('Client_Name', 'N/A'))
     with col2:
-        st.metric("Services & Testing", f"₹{pricing_result['Total_Services_Cost']:,.0f}")
+        st.metric("Due Date", qualified_rfp['Due_Date'].strftime('%Y-%m-%d'))
     with col3:
-        st.metric("Risk Premium", f"₹{pricing_result.get('Risk_Premium', 0):,.0f}")
+        st.metric("Risk Score", f"{qualified_rfp.get('Risk_Score', 'N/A')}/10")
     with col4:
-        st.metric("**GRAND TOTAL**", f"₹{pricing_result['Grand_Total']:,.0f}", delta="Submission Ready", delta_color="normal")
-    
-    if not low_match_skus:
-        st.balloons()
-        st.success("🎉 **Bid Fully Qualified.** Technical integrity: 100%. Ready for Board approval and submission.")
-    else:
-        st.warning("⚠️ **Manual Review Required.** Engineering team must evaluate custom manufacturing feasibility.")
+        st.metric("RFP Title", qualified_rfp['Title'][:30] + "..." if len(qualified_rfp['Title']) > 30 else qualified_rfp['Title'])
+
+    st.markdown("---")
+
+    # Risk Alerts
+    if qualified_rfp.get("Bid_Bond_Required") or qualified_rfp.get("Liquidated_Damages_Clause"):
+        alert_text = build_risk_alert_text(qualified_rfp)
+        st.warning(f"Risk Alert: {alert_text}")
+
+    st.markdown("---")
+
+    # Create Tabs for 4 Phases
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Technical Compliance",
+        "Pricing & Risk",
+        "Strategic Analysis",
+        "Executive Summary"
+    ])
+
+    # Prior to tabs: Run initial agent workflows to gather data
+    selected_products = None
+    low_match_skus = None
+    pricing_result = None
+
+    # TAB 1: Technical Compliance Review
+    with tab1:
+        st.subheader("Phase 1: Technical Compliance Review")
+        selected_products = technical_agent_match(qualified_rfp["Products"])
+
+        # Check SMM threshold for intervention
+        low_match_skus = [p for p in selected_products if p["Final_SMM"] < 80]
+        if low_match_skus:
+            st.error(f"Engineering Intervention Required: {len(low_match_skus)} SKU(s) below 80% SMM threshold.")
+            for sku in low_match_skus:
+                st.markdown(f"- Line {sku['Line']}: {sku['Chosen_SKU']} (SMM: {sku['Final_SMM']}%)")
+        else:
+            st.success("All specifications match at or above 80% SMM threshold.")
+
+    # TAB 2: Pricing & Risk Assessment
+    with tab2:
+        st.subheader("Phase 2: Dynamic Pricing & Risk Assessment")
+        if selected_products:
+            pricing_result = pricing_agent_calculate(selected_products, qualified_rfp["Test_Requirements"], qualified_rfp)
+        else:
+            st.info("Complete Phase 1 first to generate pricing analysis.")
+
+    # TAB 3: Strategic Business Intelligence
+    with tab3:
+        st.subheader("Phase 3: Strategic Business Intelligence")
+        if pricing_result and selected_products:
+            business_advisory_agent(pricing_result, selected_products, qualified_rfp)
+        else:
+            st.info("Complete Phase 1 and 2 first to generate strategic analysis.")
+
+    # TAB 4: Executive Summary
+    with tab4:
+        st.subheader("Phase 4: Executive Summary")
+
+        if selected_products and pricing_result:
+            display_executive_summary(selected_products, pricing_result, low_match_skus)
+        else:
+            st.info("Complete all previous phases to generate executive summary.")
 
 
 # --- Streamlit App Initialization ---
@@ -541,28 +612,375 @@ st.set_page_config(layout="wide", page_title="Agentic RFP Pro - Enterprise Editi
 
 st.markdown("""
 <style>
-.stApp {
-    background-color: #1e1e1e;
-    color: #f0f0f0;
+@import url('https://fonts.googleapis.com/css2?family=Urbanist:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+
+/* ========== CYBER-INDUSTRIAL COLOR PALETTE ========== */
+:root {
+    --bg-primary: #0A0A0A;
+    --bg-surface: #161616;
+    --accent-primary: #DEFF9A;
+    --accent-risk: #FF5F5F;
+    --accent-warning: #FFB347;
+    --accent-info: #4285F4;
+    --text-primary: #FFFFFF;
+    --text-secondary: #E0E0E0;
+    --border-color: #2A2A2A;
 }
-h1, h2, h3, h4 {
-    color: #deff9a;
+
+/* ========== MAIN APP STYLING ========== */
+.stApp {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: 'Urbanist', sans-serif;
+}
+
+/* ========== SIDEBAR - DARK INDUSTRIAL ========== */
+.stSidebar {
+    background-color: var(--bg-surface);
+    border-right: 1px solid var(--border-color);
+    backdrop-filter: blur(10px);
+}
+
+.stSidebar [data-testid="stMarkdownContainer"],
+.stSidebar label,
+.stSidebar h1,
+.stSidebar h2,
+.stSidebar h3 {
+    color: var(--text-primary);
+    font-family: 'Urbanist', sans-serif;
+    font-weight: 600;
+}
+
+/* ========== TYPOGRAPHY ========== */
+h1, h2, h3, h4, h5, h6 {
+    color: var(--text-primary);
+    font-family: 'Urbanist', sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+}
+
+h1 {
+    font-size: 2.5rem;
+    margin-bottom: 2rem;
+    border-bottom: 2px solid var(--accent-primary);
+    padding-bottom: 1rem;
+}
+
+h2 {
+    font-size: 1.8rem;
+    margin-top: 2rem;
+    margin-bottom: 1rem;
+    color: var(--accent-primary);
+    font-weight: 700;
+}
+
+h3 {
+    font-size: 1.4rem;
+    color: var(--text-primary);
+}
+
+p, span, div {
+    font-family: 'Urbanist', sans-serif;
+    color: var(--text-secondary);
+}
+
+/* ========== BUTTON STYLING ========== */
+.stButton > button {
+    background: linear-gradient(135deg, var(--accent-primary) 0%, #C4EB6E 100%);
+    color: #000000;
+    border: none;
+    border-radius: 8px;
+    font-weight: 700;
+    padding: 0.75rem 1.5rem;
+    font-family: 'Urbanist', sans-serif;
+    font-size: 0.95rem;
+    letter-spacing: 0.5px;
+    transition: all 0.3s ease;
+    box-shadow: 0 0 20px rgba(222, 255, 154, 0.3);
+}
+
+.stButton > button:hover {
+    box-shadow: 0 0 40px rgba(222, 255, 154, 0.6);
+    transform: translateY(-2px);
+    background: linear-gradient(135deg, #DEFF9A 0%, #E8FF9F 100%);
+}
+
+.stButton > button:active {
+    transform: translateY(0);
+    box-shadow: 0 0 20px rgba(222, 255, 154, 0.4);
+}
+
+/* Sidebar buttons */
+.stSidebar .stButton > button {
+    background:#FFFFFF;
+    color: #000000 !important;
+    box-shadow: 0 0 15px rgba(222, 255, 154, 0.25);
+    width: 100%;
+    font-weight: 800 !important;
+    font-color: #000000 !important;
+}
+
+.stSidebar .stButton p, 
+.stSidebar .stButton div, 
+.stSidebar .stButton span {
+    color: #000000 !important;
+}
+
+.stSidebar .stButton > button:hover {
+    color: #000000 !important;
+}
+
+/* ========== TABS STYLING ========== */
+.stTabs [data-baseweb="tab"] {
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-family: 'Urbanist', sans-serif;
+    border-radius: 8px;
+}
+
+.stTabs [aria-selected="true"] {
+    color: var(--accent-primary);
+    border-bottom: 3px solid var(--accent-primary);
+    box-shadow: 0 0 15px rgba(222, 255, 154, 0.2);
+}
+
+/* ========== DATA TABLES ========== */
+.stDataFrame {
+    background-color: var(--bg-surface);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.stDataFrame thead {
+    background-color: #1A1A1A;
+    color: var(--accent-primary);
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    border-bottom: 2px solid var(--accent-primary);
+}
+
+.stDataFrame tbody tr {
+    border-bottom: 1px solid var(--border-color);
+}
+
+.stDataFrame tbody tr:nth-child(odd) {
+    background-color: #0F0F0F;
+}
+
+.stDataFrame tbody tr:nth-child(even) {
+    background-color: var(--bg-surface);
+}
+
+.stDataFrame tbody tr:hover {
+    background-color: #1F1F1F;
+    box-shadow: inset 0 0 10px rgba(222, 255, 154, 0.1);
+}
+
+.stDataFrame tbody {
+    color: var(--text-secondary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+}
+
+/* ========== METRIC CARDS (HERO SECTION) ========== */
+.stMetric {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1.5rem;
+    border-left: 4px solid var(--accent-primary);
+    backdrop-filter: blur(5px);
+    transition: all 0.3s ease;
+}
+
+.stMetric:hover {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 25px rgba(222, 255, 154, 0.15);
+    transform: translateY(-2px);
+}
+
+.stMetric label {
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-family: 'Urbanist', sans-serif;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.stMetric > div > div {
+    color: var(--accent-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 1.8rem;
+}
+
+/* ========== EXPANDERS (COLLAPSIBLE SECTIONS) ========== */
+.streamlit-expanderHeader {
+    background-color: #1A1A1A;
+    border: 1px solid var(--border-color);
+    border-left: 4px solid var(--accent-primary);
+    color: var(--text-primary);
+    border-radius: 8px;
+    padding: 1rem;
+    font-weight: 600;
+    font-family: 'Urbanist', sans-serif;
+    transition: all 0.3s ease;
+}
+
+.streamlit-expanderHeader:hover {
+    background-color: #1F1F1F;
+    border-left-color: #DEFF9A;
+    box-shadow: 0 0 15px rgba(222, 255, 154, 0.1);
+}
+
+/* ========== ALERT BOXES ========== */
+.stAlert {
+    border-radius: 8px;
+    border-left: 4px solid var(--border-color);
+    font-family: 'Urbanist', sans-serif;
+}
+
+/* Success */
+.stSuccess {
+    background-color: rgba(34, 177, 76, 0.1);
+    border-left-color: var(--accent-primary);
+}
+
+/* Error */
+.stError {
+    background-color: rgba(255, 95, 95, 0.1);
+    border-left-color: var(--accent-risk);
+}
+
+/* Warning */
+.stWarning {
+    background-color: rgba(255, 179, 71, 0.1);
+    border-left-color: var(--accent-warning);
+}
+
+/* Info */
+.stInfo {
+    background-color: rgba(66, 133, 244, 0.1);
+    border-left-color: var(--accent-info);
+}
+
+/* ========== STATUS BADGES ========== */
+.status-badge {
+    display: inline-block;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-family: 'Urbanist', sans-serif;
+    margin-right: 0.5rem;
+}
+
+.badge-success {
+    background-color: rgba(34, 177, 76, 0.2);
+    color: var(--accent-primary);
+    border: 1px solid var(--accent-primary);
+}
+
+.badge-warning {
+    background-color: rgba(255, 179, 71, 0.2);
+    color: var(--accent-warning);
+    border: 1px solid var(--accent-warning);
+}
+
+.badge-error {
+    background-color: rgba(255, 95, 95, 0.2);
+    color: var(--accent-risk);
+    border: 1px solid var(--accent-risk);
+}
+
+.badge-info {
+    background-color: rgba(66, 133, 244, 0.2);
+    color: var(--accent-info);
+    border: 1px solid var(--accent-info);
+}
+
+/* ========== DIVIDERS ========== */
+.stHorizontalBlock {
+    border-color: var(--border-color);
+}
+
+hr {
+    border-color: var(--border-color);
+    margin: 2rem 0;
+}
+
+/* ========== MAIN CONTENT AREA ========== */
+.main {
+    background-color: var(--bg-primary);
+}
+
+[data-testid="stHorizontalBlock"] > [data-testid="column"] {
+    gap: 1rem;
+}
+
+/* ========== ACCESSIBILITY - CONTRAST ========== */
+.stMarkdown {
+    color: var(--text-secondary);
+}
+
+.stMarkdown h1,
+.stMarkdown h2,
+.stMarkdown h3 {
+    color: var(--text-primary);
+}
+
+/* ========== MICRO-INTERACTIONS ========== */
+.stButton > button,
+.stMetric,
+.streamlit-expanderHeader {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Glassmorphism for headers */
+.header-glass {
+    background: rgba(22, 22, 22, 0.7);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border-color);
+    border-radius: 0 0 8px 8px;
+}
+
+/* ========== SCROLLBAR STYLING ========== */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-surface);
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(222, 255, 154, 0.3);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(222, 255, 154, 0.5);
 }
 </style>
 """, unsafe_allow_html=True)
 
-st.sidebar.title("🎯 Agentic Control Panel")
+st.sidebar.title("RFP Control Panel")
 st.sidebar.markdown("**Enterprise RFP Processing System**")
 st.sidebar.markdown("---")
 
 # Display LME Rates in sidebar
-st.sidebar.markdown("### 📈 Live LME Rates")
-for metal, rate in LME_RATES.items():
-    st.sidebar.metric(metal, f"${rate:,}/MT")
+st.sidebar.markdown("### Live LME Rates")
+lme_data = [{"Metal": metal, "Rate (USD/MT)": f"${rate:,}"} for metal, rate in LME_RATES.items()]
+st.sidebar.dataframe(pd.DataFrame(lme_data), use_container_width=True)
 
 st.sidebar.markdown("---")
 
-if st.sidebar.button("1️⃣ Initiate Sales Agent Scan"):
+if st.sidebar.button("Initiate Sales Agent Scan"):
     rfp_data_with_dates = [
         {**rfp, "Due_Date": rfp["Due_Date"]} 
         for rfp in RFP_DATA
@@ -570,10 +988,7 @@ if st.sidebar.button("1️⃣ Initiate Sales Agent Scan"):
     
     st.session_state['qualified_rfps'] = sales_agent_scan(rfp_data_with_dates)
     
-    if st.session_state['qualified_rfps']:
-        st.session_state['show_process'] = True
-    else:
-        st.session_state['show_process'] = False
+    st.session_state['show_process'] = bool(st.session_state['qualified_rfps'])
         
 if 'show_process' in st.session_state and st.session_state['show_process']:
     selected_rfp = st.session_state['qualified_rfps'][0]
@@ -583,22 +998,22 @@ if 'show_process' in st.session_state and st.session_state['show_process']:
     st.sidebar.markdown(f"**Risk Score:** {selected_rfp.get('Risk_Score', 'N/A')}/10")
     st.sidebar.markdown(f"**Priority:** {selected_rfp.get('Priority', 'N/A')}")
     
-    if st.sidebar.button("2️⃣ Execute Chief Bid Officer", key="run_orchestrator"):
+    if st.sidebar.button("Execute Chief Bid Officer", key="run_orchestrator"):
         st.empty() 
         main_orchestrator(selected_rfp)
     else:
         st.warning("Click **'Execute Chief Bid Officer'** to start the multi-agent workflow.")
 
 if 'qualified_rfps' not in st.session_state:
-    st.title("Welcome to Agentic RFP Pro 🚀")
+    st.title("Welcome to Agentic RFP Pro")
     st.markdown("### Enterprise-Grade Intelligent Bid Processing System")
     st.markdown("""
     **System Architecture:**
-    - 🔍 **Sales Discovery Agent:** Market intelligence & risk scoring
-    - ⚙️ **Technical Agent:** Weighted SMM analysis (30% Material, 25% Cores, 25% Size, 20% Insulation)
-    - 💰 **Pricing Agent:** LME commodity-indexed costing with risk premiums
-    - 📊 **Business Advisory Agent:** ROI analysis & sensitivity reporting
-    - 🚀 **Chief Bid Officer:** End-to-end orchestration
-    
+    - Sales Discovery Agent: Market intelligence & risk scoring
+    - Technical Agent: Weighted SMM analysis (30% Material, 25% Cores, 25% Size, 20% Insulation)
+    - Pricing Agent: LME commodity-indexed costing with risk premiums
+    - Business Advisory Agent: ROI analysis & sensitivity reporting
+    - Chief Bid Officer: End-to-end orchestration
+
     Click **'Initiate Sales Agent Scan'** in the sidebar to begin.
     """)

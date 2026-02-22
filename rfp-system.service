@@ -1,0 +1,48 @@
+[Unit]
+Description=RFP Processing System - Multi-Agent Bidding API
+Documentation=https://github.com/yourorg/agentic-rfp-demo
+After=network.target
+
+[Service]
+Type=notify
+User=rfp-system
+Group=rfp-system
+WorkingDirectory=/opt/rfp-system
+
+# Python virtual environment
+Environment="PATH=/opt/rfp-system/venv/bin"
+EnvironmentFile=/opt/rfp-system/.env.production
+
+# Start command - using gunicorn with uvicorn workers
+ExecStart=/opt/rfp-system/venv/bin/gunicorn \
+    --workers 4 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --bind 127.0.0.1:8000 \
+    --access-logfile /var/log/rfp-system/access.log \
+    --error-logfile /var/log/rfp-system/error.log \
+    --log-level info \
+    --timeout 300 \
+    backend.api.main:app
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=4096
+
+# Standard output/error
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rfp-system
+
+# Security hardening
+PrivateTmp=yes
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/rfp-system/data /var/log/rfp-system
+
+[Install]
+WantedBy=multi-user.target
